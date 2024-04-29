@@ -3,55 +3,78 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
-	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func main() {
+	containerName := os.Args[1]
+	envVar := os.Args[2]
+	varName := strings.Split(envVar, "=")[0]
 	ctx := context.Background()
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		panic(err)
 	}
 	defer cli.Close()
-	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := cli.ContainerList(ctx,
+		container.ListOptions{Filters: filters.NewArgs(filters.Arg("name", "/"+containerName))},
+	)
 	if err != nil {
 		panic(err)
 	}
-	id := containers[2].ID
-	oldContainer, err := cli.ContainerInspect(ctx, id)
-	if err != nil {
-		panic(err)
+	if len(containers) == 0 {
+		panic("No containers found")
 	}
-	name := oldContainer.Name
-	oldContainer.Config.Env = append(oldContainer.Config.Env, "TEST=hello")
-	err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
-	if err != nil {
-		panic(err)
-	}
-	newContainer, err := cli.ContainerCreate(ctx,
-		oldContainer.Config,
-		oldContainer.HostConfig,
-		&network.NetworkingConfig{EndpointsConfig: containers[2].NetworkSettings.Networks},
-		&v1.Platform{},
-		"tempname")
-	if err != nil {
-		panic(err)
-	}
-	err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
-	if err != nil {
-		panic(err)
-	}
-	err = cli.ContainerRename(ctx, newContainer.ID, name)
-	if err != nil {
-		panic(err)
-	}
-	err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
-	if err != nil {
-		panic(err)
+	for _, v := range containers {
+		id := v.ID
+		oldContainer, err := cli.ContainerInspect(ctx, id)
+		if err != nil {
+			panic(err)
+		}
+		name := oldContainer.Name
+		found := false
+		for i, v := range oldContainer.Config.Env {
+			if strings.Split(v, "=")[0] == varName {
+				oldContainer.Config.Env[i] = envVar
+				found = true
+				break
+			}
+		}
+		if !found {
+			oldContainer.Config.Env = append(oldContainer.Config.Env, envVar)
+		}
+		err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
+		if err != nil {
+			panic(err)
+		}
+		newContainer, err := cli.ContainerCreate(ctx,
+			oldContainer.Config,
+			oldContainer.HostConfig,
+			&network.NetworkingConfig{EndpointsConfig: v.NetworkSettings.Networks},
+			nil,
+			"tempname")
+		if err != nil {
+			panic(err)
+		}
+		err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
+		if err != nil {
+			panic(err)
+		}
+		err = cli.ContainerRename(ctx, newContainer.ID, name)
+		if err != nil {
+			panic(err)
+		}
+		err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
+		if err != nil {
+			panic(err)
+		}
+		println(fmt.Sprintf("Restarted %s", name))
 	}
 	fmt.Println("OK")
 }
