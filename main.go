@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
@@ -15,7 +16,6 @@ import (
 func main() {
 	containerName := os.Args[1]
 	envVar := os.Args[2]
-	varName := strings.Split(envVar, "=")[0]
 	ctx := context.Background()
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -31,6 +31,12 @@ func main() {
 	if len(containers) == 0 {
 		panic("No containers found")
 	}
+	updateEnv(ctx, cli, containers, envVar)
+	fmt.Println("OK")
+}
+
+func updateEnv(ctx context.Context, cli *client.Client, containers []types.Container, envVar string) {
+	varName := strings.Split(envVar, "=")[0]
 	for _, v := range containers {
 		id := v.ID
 		oldContainer, err := cli.ContainerInspect(ctx, id)
@@ -76,5 +82,4 @@ func main() {
 		}
 		println(fmt.Sprintf("Restarted %s", name))
 	}
-	fmt.Println("OK")
 }
