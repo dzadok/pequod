@@ -11,30 +11,118 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+
+	"github.com/charmbracelet/bubbles/table"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
+var baseStyle = lipgloss.NewStyle().
+	BorderStyle(lipgloss.NormalBorder()).
+	BorderForeground(lipgloss.Color("240"))
+
+type model struct {
+	table table.Model
+}
+
+func (m model) Init() tea.Cmd { return nil }
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			if m.table.Focused() {
+				m.table.Blur()
+			} else {
+				m.table.Focus()
+			}
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "enter":
+			// TODO: figure out capturing input for env var name and value
+			// then call updateEnv with m.table.SelectedRow()[0]
+			return m, tea.Batch(
+				tea.Printf("Let's go to %s!", m.table.SelectedRow()[1]),
+			)
+		}
+	}
+	m.table, cmd = m.table.Update(msg)
+	return m, cmd
+}
+
+func (m model) View() string {
+	return baseStyle.Render(m.table.View()) + "\n"
+}
+
 func main() {
-	containerName := os.Args[1]
-	envVar := os.Args[2]
 	ctx := context.Background()
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		panic(err)
 	}
 	defer cli.Close()
-	containers, err := cli.ContainerList(ctx,
-		container.ListOptions{Filters: filters.NewArgs(filters.Arg("name", "/"+containerName))},
-	)
-	if err != nil {
-		panic(err)
+
+	if len(os.Args) > 1 {
+		containerName := os.Args[1]
+		envVar := os.Args[2]
+		containers, err := cli.ContainerList(ctx,
+			container.ListOptions{Filters: filters.NewArgs(filters.Arg("name", "/"+containerName))},
+		)
+		if err != nil {
+			panic(err)
+		}
+		if len(containers) == 0 {
+			panic("No containers found")
+		}
+		updateEnv(ctx, cli, containers, envVar)
+		fmt.Println("OK")
+
+	} else {
+
+		containers, err := cli.ContainerList(ctx, container.ListOptions{})
+		if err != nil {
+			panic(err)
+		}
+
+		columns := []table.Column{
+			{Title: "ID", Width: 12},
+			{Title: "Name", Width: 30},
+		}
+
+		rows := []table.Row{}
+
+		for _, v := range containers {
+			name, _ := strings.CutPrefix(strings.Join(v.Names, ", "), "/")
+			rows = append(
+				rows,
+				table.Row{
+					v.ID,
+					name,
+				},
+			)
+		}
+
+		t := table.New(
+			table.WithColumns(columns),
+			table.WithRows(rows),
+			table.WithFocused(true),
+			table.WithWidth(80),
+		)
+
+		s := table.DefaultStyles()
+		t.SetStyles(s)
+
+		m := model{t}
+		if _, err := tea.NewProgram(m).Run(); err != nil {
+			panic(err)
+		}
 	}
-	if len(containers) == 0 {
-		panic("No containers found")
-	}
-	updateEnv(ctx, cli, containers, envVar)
-	fmt.Println("OK")
 }
 
+// TODO: Refactor this to accept ids instead of containers
+// that will work much better with the table in the tui
 func updateEnv(ctx context.Context, cli *client.Client, containers []types.Container, envVar string) {
 	varName := strings.Split(envVar, "=")[0]
 	for _, v := range containers {
@@ -45,8 +133,8 @@ func updateEnv(ctx context.Context, cli *client.Client, containers []types.Conta
 		}
 		name := oldContainer.Name
 		found := false
-		for i, v := range oldContainer.Config.Env {
-			if strings.Split(v, "=")[0] == varName {
+		for i, e := range oldContainer.Config.Env {
+			if strings.Split(e, "=")[0] == varName {
 				oldContainer.Config.Env[i] = envVar
 				found = true
 				break
@@ -62,7 +150,7 @@ func updateEnv(ctx context.Context, cli *client.Client, containers []types.Conta
 		newContainer, err := cli.ContainerCreate(ctx,
 			oldContainer.Config,
 			oldContainer.HostConfig,
-			&network.NetworkingConfig{EndpointsConfig: v.NetworkSettings.Networks},
+			&network.NetworkingConfig{EndpointsConfig: oldContainer.NetworkSettings.Networks},
 			nil,
 			"tempname")
 		if err != nil {
