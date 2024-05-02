@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
@@ -22,6 +21,8 @@ var baseStyle = lipgloss.NewStyle().
 	BorderForeground(lipgloss.Color("240"))
 
 type model struct {
+	ctx   context.Context
+	cli   *client.Client
 	table table.Model
 }
 
@@ -43,9 +44,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			// TODO: figure out capturing input for env var name and value
 			// then call updateEnv with m.table.SelectedRow()[0]
-			return m, tea.Batch(
-				tea.Printf("Let's go to %s!", m.table.SelectedRow()[1]),
-			)
+			return m, m.updateEnvCmd()
 		}
 	}
 	m.table, cmd = m.table.Update(msg)
@@ -76,7 +75,14 @@ func main() {
 		if len(containers) == 0 {
 			panic("No containers found")
 		}
-		updateEnv(ctx, cli, containers, envVar)
+		var ids []string
+		for _, v := range containers {
+			ids = append(ids, v.ID)
+		}
+		err = updateEnv(ctx, cli, ids, envVar)
+		if err != nil {
+			panic(err)
+		}
 		fmt.Println("OK")
 
 	} else {
@@ -114,22 +120,27 @@ func main() {
 		s := table.DefaultStyles()
 		t.SetStyles(s)
 
-		m := model{t}
+		m := model{ctx, cli, t}
 		if _, err := tea.NewProgram(m).Run(); err != nil {
 			panic(err)
 		}
 	}
 }
 
-// TODO: Refactor this to accept ids instead of containers
-// that will work much better with the table in the tui
-func updateEnv(ctx context.Context, cli *client.Client, containers []types.Container, envVar string) {
+func (m model) updateEnvCmd() tea.Cmd {
+	err := updateEnv(m.ctx, m.cli, []string{m.table.SelectedRow()[0]}, "TEST=tea")
+	if err != nil {
+		panic(err)
+	}
+	return nil
+}
+
+func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar string) error {
 	varName := strings.Split(envVar, "=")[0]
-	for _, v := range containers {
-		id := v.ID
-		oldContainer, err := cli.ContainerInspect(ctx, id)
+	for _, v := range ids {
+		oldContainer, err := cli.ContainerInspect(ctx, v)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		name := oldContainer.Name
 		found := false
@@ -145,7 +156,7 @@ func updateEnv(ctx context.Context, cli *client.Client, containers []types.Conta
 		}
 		err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
 		if err != nil {
-			panic(err)
+			return err
 		}
 		newContainer, err := cli.ContainerCreate(ctx,
 			oldContainer.Config,
@@ -154,20 +165,21 @@ func updateEnv(ctx context.Context, cli *client.Client, containers []types.Conta
 			nil,
 			"tempname")
 		if err != nil {
-			panic(err)
+			return err
 		}
 		err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
 		if err != nil {
-			panic(err)
+			return err
 		}
 		err = cli.ContainerRename(ctx, newContainer.ID, name)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
 		if err != nil {
-			panic(err)
+			return err
 		}
 		println(fmt.Sprintf("Restarted %s", name))
 	}
+	return nil
 }
