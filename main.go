@@ -79,7 +79,7 @@ func main() {
 		for _, v := range containers {
 			ids = append(ids, v.ID)
 		}
-		err = updateEnv(ctx, cli, ids, envVar)
+		_, err = updateEnv(ctx, cli, ids, envVar)
 		if err != nil {
 			panic(err)
 		}
@@ -130,20 +130,30 @@ func main() {
 }
 
 func (m model) updateEnvCmd() tea.Cmd {
-	err := updateEnv(m.ctx, m.cli, []string{m.table.SelectedRow()[0]}, "TEST=tea")
+	o := m.table.SelectedRow()[0]
+	ids, err := updateEnv(m.ctx, m.cli, []string{m.table.SelectedRow()[0]}, "TEST=tea")
 	if err != nil {
 		panic(err)
 	}
+	newRows := []table.Row{}
+	for _, v := range m.table.Rows() {
+		if v[0] == o {
+			v[0] = ids[0]
+		}
+		newRows = append(newRows, v)
+	}
+	m.table.SetRows(newRows)
+	// TODO: Update model with new container
 	return nil
 }
 
-// TODO: Update model with new container
-func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar string) error {
+func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar string) ([]string, error) {
 	varName := strings.Split(envVar, "=")[0]
+	i := []string{}
 	for _, v := range ids {
 		oldContainer, err := cli.ContainerInspect(ctx, v)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		name := oldContainer.Name
 		found := false
@@ -159,7 +169,7 @@ func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar str
 		}
 		err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		newContainer, err := cli.ContainerCreate(ctx,
 			oldContainer.Config,
@@ -168,21 +178,22 @@ func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar str
 			nil,
 			"tempname")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = cli.ContainerRename(ctx, newContainer.ID, name)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		println(fmt.Sprintf("Restarted %s", name))
+		i = append(i, newContainer.ID)
+		// println(fmt.Sprintf("Restarted %s", name))
 	}
-	return nil
+	return i, nil
 }
