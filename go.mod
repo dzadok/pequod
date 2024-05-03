@@ -1,4 +1,4 @@
-module github.com/dzadok/docker-env
+module github.com/dzadok/pequod
 
 go 1.22.1
 

@@ -95,6 +95,7 @@ func main() {
 		columns := []table.Column{
 			{Title: "ID", Width: 12},
 			{Title: "Name", Width: 30},
+			{Title: "Command", Width: 40},
 		}
 
 		rows := []table.Row{}
@@ -106,6 +107,7 @@ func main() {
 				table.Row{
 					v.ID,
 					name,
+					v.Command,
 				},
 			)
 		}
@@ -114,7 +116,7 @@ func main() {
 			table.WithColumns(columns),
 			table.WithRows(rows),
 			table.WithFocused(true),
-			table.WithWidth(80),
+			table.WithWidth(120),
 		)
 
 		s := table.DefaultStyles()
@@ -135,6 +137,7 @@ func (m model) updateEnvCmd() tea.Cmd {
 	return nil
 }
 
+// TODO: Update model with new container
 func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar string) error {
 	varName := strings.Split(envVar, "=")[0]
 	for _, v := range ids {
