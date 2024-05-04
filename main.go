@@ -21,38 +21,49 @@ var baseStyle = lipgloss.NewStyle().
 	BorderForeground(lipgloss.Color("240"))
 
 type model struct {
-	ctx   context.Context
-	cli   *client.Client
-	table table.Model
+	ctx        context.Context
+	cli        *client.Client
+	containers table.Model
+	envs       table.Model
+	showEnvs   bool
 }
 
-func (m model) Init() tea.Cmd { return nil }
+func (m *model) Init() tea.Cmd { return nil }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			if m.table.Focused() {
-				m.table.Blur()
+			if m.containers.Focused() {
+				m.containers.Blur()
 			} else {
-				m.table.Focus()
+				m.containers.Focus()
 			}
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "tab":
+			return m, m.displayEnv()
 		case "enter":
 			// TODO: figure out capturing input for env var name and value
 			// then call updateEnv with m.table.SelectedRow()[0]
 			return m, m.updateEnvCmd()
 		}
 	}
-	m.table, cmd = m.table.Update(msg)
+	if m.showEnvs == true {
+		m.envs, cmd = m.envs.Update(msg)
+	} else {
+		m.containers, cmd = m.containers.Update(msg)
+	}
 	return m, cmd
 }
 
-func (m model) View() string {
-	return baseStyle.Render(m.table.View()) + "\n"
+func (m *model) View() string {
+	if m.showEnvs == true {
+		return baseStyle.Render(m.envs.View()) + "\n"
+	}
+	return baseStyle.Render(m.containers.View()) + "\n"
 }
 
 func main() {
@@ -122,28 +133,59 @@ func main() {
 		s := table.DefaultStyles()
 		t.SetStyles(s)
 
-		m := model{ctx, cli, t}
+		m := new(model)
+		m.cli = cli
+		m.ctx = ctx
+		m.containers = t
+		m.envs = table.New(
+			table.WithColumns([]table.Column{
+				{Title: "Name", Width: 33},
+				{Title: "Value", Width: 33},
+			}),
+			table.WithRows([]table.Row{}),
+			table.WithWidth(80),
+		)
+		m.showEnvs = false
 		if _, err := tea.NewProgram(m).Run(); err != nil {
 			panic(err)
 		}
 	}
 }
 
-func (m model) updateEnvCmd() tea.Cmd {
-	o := m.table.SelectedRow()[0]
-	ids, err := updateEnv(m.ctx, m.cli, []string{m.table.SelectedRow()[0]}, "TEST=tea")
+func (m *model) displayEnv() tea.Cmd {
+	m.showEnvs = true
+	c := m.containers.SelectedRow()[0]
+	j, err := m.cli.ContainerInspect(m.ctx, c)
+	if err != nil {
+		panic(err)
+	}
+	rows := []table.Row{}
+	for _, e := range j.Config.Env {
+		estring := strings.Split(e, "=")
+		rows = append(rows, table.Row{estring[0], estring[1]})
+
+	}
+	m.envs.SetRows(rows)
+	m.envs.Update(nil)
+
+	return nil
+}
+
+func (m *model) updateEnvCmd() tea.Cmd {
+	m.showEnvs = false
+	o := m.containers.SelectedRow()[0]
+	ids, err := updateEnv(m.ctx, m.cli, []string{m.containers.SelectedRow()[0]}, "TEST=tea")
 	if err != nil {
 		panic(err)
 	}
 	newRows := []table.Row{}
-	for _, v := range m.table.Rows() {
+	for _, v := range m.containers.Rows() {
 		if v[0] == o {
 			v[0] = ids[0]
 		}
 		newRows = append(newRows, v)
 	}
-	m.table.SetRows(newRows)
-	// TODO: Update model with new container
+	m.containers.SetRows(newRows)
 	return nil
 }
 
