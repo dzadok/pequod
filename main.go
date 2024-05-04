@@ -44,6 +44,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
+			if m.showEnvs == true {
+				m.showEnvs = false
+				return m, nil
+			}
 			return m, m.displayEnv()
 		case "enter":
 			// TODO: figure out capturing input for env var name and value
@@ -139,11 +143,11 @@ func main() {
 		m.containers = t
 		m.envs = table.New(
 			table.WithColumns([]table.Column{
-				{Title: "Name", Width: 33},
-				{Title: "Value", Width: 33},
+				{Title: "Name", Width: 30},
+				{Title: "Value", Width: 85},
 			}),
 			table.WithRows([]table.Row{}),
-			table.WithWidth(80),
+			table.WithWidth(120),
 		)
 		m.showEnvs = false
 		if _, err := tea.NewProgram(m).Run(); err != nil {
