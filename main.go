@@ -147,6 +147,7 @@ func main() {
 				{Title: "Value", Width: 85},
 			}),
 			table.WithRows([]table.Row{}),
+			table.WithFocused(true),
 			table.WithWidth(120),
 		)
 		m.showEnvs = false
@@ -170,6 +171,7 @@ func (m *model) displayEnv() tea.Cmd {
 
 	}
 	m.envs.SetRows(rows)
+	m.envs.GotoTop()
 	m.envs.Update(nil)
 
 	return nil
