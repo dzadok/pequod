@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -26,6 +27,7 @@ type model struct {
 	containers table.Model
 	envs       table.Model
 	showEnvs   bool
+	error      error
 }
 
 func (m *model) Init() tea.Cmd { return nil }
@@ -36,23 +38,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			if m.containers.Focused() {
-				m.containers.Blur()
-			} else {
-				m.containers.Focus()
-			}
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		case "tab":
 			if m.showEnvs == true {
 				m.showEnvs = false
 				return m, nil
 			}
+			return m, tea.Quit
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "tab", "enter":
+			if m.showEnvs == true {
+				m.showEnvs = false
+				varName := m.envs.SelectedRow()[0]
+				varValue := m.envs.SelectedRow()[1]
+				huh.NewInput().
+					Title(varName).
+					Value(&varValue).
+					Run()
+				return m, m.updateEnvCmd(varName, varValue)
+			}
 			return m, m.displayEnv()
-		case "enter":
-			// TODO: figure out capturing input for env var name and value
-			// then call updateEnv with m.table.SelectedRow()[0]
-			return m, m.updateEnvCmd()
 		}
 	}
 	if m.showEnvs == true {
@@ -110,7 +114,7 @@ func main() {
 		columns := []table.Column{
 			{Title: "ID", Width: 12},
 			{Title: "Name", Width: 30},
-			{Title: "Command", Width: 40},
+			{Title: "Command", Width: 70},
 		}
 
 		rows := []table.Row{}
@@ -177,10 +181,15 @@ func (m *model) displayEnv() tea.Cmd {
 	return nil
 }
 
-func (m *model) updateEnvCmd() tea.Cmd {
+// TODO: Only call updateEnv if something changed
+func (m *model) updateEnvCmd(n string, v string) tea.Cmd {
+	e := []string{}
+	e = append(e, n)
+	e = append(e, v)
+	u := strings.Join(e, "=")
 	m.showEnvs = false
 	o := m.containers.SelectedRow()[0]
-	ids, err := updateEnv(m.ctx, m.cli, []string{m.containers.SelectedRow()[0]}, "TEST=tea")
+	ids, err := updateEnv(m.ctx, m.cli, []string{m.containers.SelectedRow()[0]}, u)
 	if err != nil {
 		panic(err)
 	}
@@ -241,7 +250,6 @@ func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar str
 			return nil, err
 		}
 		i = append(i, newContainer.ID)
-		// println(fmt.Sprintf("Restarted %s", name))
 	}
 	return i, nil
 }
