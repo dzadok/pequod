@@ -45,6 +45,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		// o => insert new line in vim, "a"dd, "n"ew
+		case "o", "a", "n":
+			if m.showEnvs == true {
+				var varName string
+				var varValue string
+				huh.NewInput().
+					Title("New Variable Name").
+					Value(&varName).
+					Run()
+				huh.NewInput().
+					Title(varName).
+					Value(&varValue).
+					Run()
+				return m, m.updateEnvCmd(varName, varValue)
+			}
 		case "tab", "enter":
 			if m.showEnvs == true {
 				m.showEnvs = false
