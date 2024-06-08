@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -22,13 +23,19 @@ var baseStyle = lipgloss.NewStyle().
 	BorderForeground(lipgloss.Color("240"))
 
 type model struct {
-	ctx        context.Context
 	cli        *client.Client
 	containers table.Model
 	envs       table.Model
 	showEnvs   bool
 	error      error
+	n          string
+	v          string
+	spinner    *spinner.Model
 }
+
+type showEnv struct{}
+
+type showContainers struct{}
 
 func (m *model) Init() tea.Cmd { return nil }
 
@@ -58,21 +65,40 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Title(varName).
 					Value(&varValue).
 					Run()
-				return m, m.updateEnvCmd(varName, varValue)
+				m.n = varName
+				m.v = varValue
+				return m, m.updateEnvCmd
 			}
 		case "tab", "enter":
 			if m.showEnvs == true {
 				m.showEnvs = false
-				varName := m.envs.SelectedRow()[0]
-				varValue := m.envs.SelectedRow()[1]
+				m.n = m.envs.SelectedRow()[0]
+				m.v = m.envs.SelectedRow()[1]
 				huh.NewInput().
-					Title(varName).
-					Value(&varValue).
+					Title(m.n).
+					Value(&m.v).
 					Run()
-				return m, m.updateEnvCmd(varName, varValue)
+				s := spinner.New()
+				m.spinner = &s
+				return m, tea.Batch(m.spinner.Tick, m.updateEnvCmd)
 			}
-			return m, m.displayEnv()
+			s := spinner.New()
+			m.spinner = &s
+			return m, tea.Batch(m.spinner.Tick, m.displayEnv)
 		}
+	case showEnv:
+		m.spinner = nil
+		m.showEnvs = true
+		return m, nil
+	case showContainers:
+		m.spinner = nil
+		m.showEnvs = false
+		return m, nil
+	}
+	if m.spinner != nil {
+		s, cmd := m.spinner.Update(m.spinner.Tick())
+		m.spinner = &s
+		return m, cmd
 	}
 	if m.showEnvs == true {
 		m.envs, cmd = m.envs.Update(msg)
@@ -83,6 +109,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) View() string {
+	if m.spinner != nil {
+		return m.spinner.View()
+	}
 	if m.showEnvs == true {
 		return baseStyle.Render(m.envs.View()) + "\n"
 	}
@@ -158,7 +187,6 @@ func main() {
 
 		m := new(model)
 		m.cli = cli
-		m.ctx = ctx
 		m.containers = t
 		m.envs = table.New(
 			table.WithColumns([]table.Column{
@@ -170,16 +198,16 @@ func main() {
 			table.WithWidth(120),
 		)
 		m.showEnvs = false
-		if _, err := tea.NewProgram(m).Run(); err != nil {
+		if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
 			panic(err)
 		}
 	}
 }
 
-func (m *model) displayEnv() tea.Cmd {
+func (m *model) displayEnv() tea.Msg {
 	m.showEnvs = true
 	c := m.containers.SelectedRow()[0]
-	j, err := m.cli.ContainerInspect(m.ctx, c)
+	j, err := m.cli.ContainerInspect(context.Background(), c)
 	if err != nil {
 		panic(err)
 	}
@@ -193,18 +221,18 @@ func (m *model) displayEnv() tea.Cmd {
 	m.envs.GotoTop()
 	m.envs.Update(nil)
 
-	return nil
+	return showEnv{}
 }
 
 // TODO: Only call updateEnv if something changed
-func (m *model) updateEnvCmd(n string, v string) tea.Cmd {
+func (m *model) updateEnvCmd() tea.Msg {
 	e := []string{}
-	e = append(e, n)
-	e = append(e, v)
+	e = append(e, m.n)
+	e = append(e, m.v)
 	u := strings.Join(e, "=")
 	m.showEnvs = false
 	o := m.containers.SelectedRow()[0]
-	ids, err := updateEnv(m.ctx, m.cli, []string{m.containers.SelectedRow()[0]}, u)
+	ids, err := updateEnv(context.Background(), m.cli, []string{m.containers.SelectedRow()[0]}, u)
 	if err != nil {
 		panic(err)
 	}
@@ -216,7 +244,7 @@ func (m *model) updateEnvCmd(n string, v string) tea.Cmd {
 		newRows = append(newRows, v)
 	}
 	m.containers.SetRows(newRows)
-	return nil
+	return showContainers{}
 }
 
 func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar string) ([]string, error) {
