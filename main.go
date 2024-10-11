@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -22,30 +23,44 @@ var baseStyle = lipgloss.NewStyle().
 	BorderStyle(lipgloss.NormalBorder()).
 	BorderForeground(lipgloss.Color("240"))
 
-type model struct {
+type mainModel struct {
 	cli        *client.Client
 	containers table.Model
-	envs       table.Model
+	envs       envModel
 	showEnvs   bool
 	error      error
-	n          string
-	v          string
 	spinner    *spinner.Model
+}
+
+type envModel struct {
+	cli       *client.Client
+	container string
+	envs      table.Model
+	n         string
+	v         string
+	spinner   *spinner.Model
 }
 
 type showEnv struct{}
 
 type showContainers struct{}
 
-func (m *model) Init() tea.Cmd { return nil }
+type display struct {
+	e envModel
+}
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m mainModel) Init() tea.Cmd { return nil }
+
+func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
 			if m.showEnvs == true {
+				// 	m.showEnvs = false
+				// 	m.spinner = nil
+				// 	return m, nil
 				m.showEnvs = false
 				return m, nil
 			}
@@ -53,76 +68,115 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		// o => insert new line in vim, "a"dd, "n"ew
-		case "o", "a", "n":
-			if m.showEnvs == true {
-				var varName string
-				var varValue string
-				huh.NewInput().
-					Title("New Variable Name").
-					Value(&varName).
-					Run()
-				huh.NewInput().
-					Title(varName).
-					Value(&varValue).
-					Run()
-				m.n = varName
-				m.v = varValue
-				return m, m.updateEnvCmd
-			}
+		// case "o", "a", "n":
+		// 	if m.showEnvs == true {
+		// 		m.envs, cmd = m.envs.Update(msg)
+		// 		return m, cmd
+		// 	}
 		case "tab", "enter":
 			if m.showEnvs == true {
-				m.showEnvs = false
-				m.n = m.envs.SelectedRow()[0]
-				m.v = m.envs.SelectedRow()[1]
-				huh.NewInput().
-					Title(m.n).
-					Value(&m.v).
-					Run()
-				s := spinner.New()
-				m.spinner = &s
-				return m, tea.Batch(m.spinner.Tick, m.updateEnvCmd)
+				// 	m.showEnvs = false
+				// 	m.envs, cmd = m.envs.Update(msg)
+				// 	return m, cmd
 			}
+			m.showEnvs = true
 			s := spinner.New()
 			m.spinner = &s
-			return m, tea.Batch(m.spinner.Tick, m.displayEnv)
+			return m, tea.Batch(m.spinner.Tick, m.newEnvModel)
 		}
 	case showEnv:
 		m.spinner = nil
 		m.showEnvs = true
-		return m, nil
+		// m.envs, cmd = m.envs.Update(msg)
+		return m, cmd
 	case showContainers:
 		m.spinner = nil
 		m.showEnvs = false
 		return m, nil
+	}
+	if m.showEnvs == true {
+		e, cmd := m.envs.Update(msg)
+		m.envs = e
+		return m, cmd
 	}
 	if m.spinner != nil {
 		s, cmd := m.spinner.Update(m.spinner.Tick())
 		m.spinner = &s
 		return m, cmd
 	}
-	if m.showEnvs == true {
-		m.envs, cmd = m.envs.Update(msg)
-	} else {
-		m.containers, cmd = m.containers.Update(msg)
+	m.containers, cmd = m.containers.Update(msg)
+	return m, cmd
+}
+
+func (m envModel) Update(msg tea.Msg) (envModel, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			return m, m.exit
+		case "tab", "enter":
+			m.n = m.envs.SelectedRow()[0]
+			m.v = m.envs.SelectedRow()[1]
+			huh.NewInput().
+				Title(m.n).
+				Value(&m.v).
+				Run()
+			s := spinner.New()
+			m.spinner = &s
+			return m, tea.Batch(m.spinner.Tick, m.updateEnvCmd)
+
+		case "o", "a", "n":
+			var varName string
+			var varValue string
+			huh.NewInput().
+				Title("New Variable Name").
+				Value(&varName).
+				Run()
+			huh.NewInput().
+				Title(varName).
+				Value(&varValue).
+				Run()
+			m.n = varName
+			m.v = varValue
+			return m, m.updateEnvCmd
+		}
+	case display:
+		msg.e.envs, cmd = msg.e.envs.Update(msg)
+		msg.e.spinner = nil
+		return msg.e, cmd
 	}
 	return m, cmd
 }
 
-func (m *model) View() string {
+func (m mainModel) View() string {
+	if m.showEnvs == true {
+		return m.envs.View()
+	}
 	if m.spinner != nil {
 		return m.spinner.View()
-	}
-	if m.showEnvs == true {
-		return baseStyle.Render(m.envs.View()) + "\n"
 	}
 	return baseStyle.Render(m.containers.View()) + "\n"
 }
 
+func (m envModel) View() string {
+	if m.spinner != nil {
+		return m.spinner.View()
+	}
+	return baseStyle.Render(m.envs.View()) + "\n"
+}
+
 func main() {
+	f, err := os.OpenFile("./log.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Panicln(err)
+	}
+	defer f.Close()
+	log.SetOutput(f)
 	ctx := context.Background()
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 	defer cli.Close()
 
@@ -133,10 +187,10 @@ func main() {
 			container.ListOptions{Filters: filters.NewArgs(filters.Arg("name", "/"+containerName))},
 		)
 		if err != nil {
-			panic(err)
+			log.Panicln(err)
 		}
 		if len(containers) == 0 {
-			panic("No containers found")
+			log.Panicln("No containers found")
 		}
 		var ids []string
 		for _, v := range containers {
@@ -144,7 +198,7 @@ func main() {
 		}
 		_, err = updateEnv(ctx, cli, ids, envVar)
 		if err != nil {
-			panic(err)
+			log.Panicln(err)
 		}
 		fmt.Println("OK")
 
@@ -152,7 +206,7 @@ func main() {
 
 		containers, err := cli.ContainerList(ctx, container.ListOptions{})
 		if err != nil {
-			panic(err)
+			log.Panicln(err)
 		}
 
 		columns := []table.Column{
@@ -185,65 +239,66 @@ func main() {
 		s := table.DefaultStyles()
 		t.SetStyles(s)
 
-		m := new(model)
+		m := new(mainModel)
 		m.cli = cli
 		m.containers = t
-		m.envs = table.New(
-			table.WithColumns([]table.Column{
-				{Title: "Name", Width: 30},
-				{Title: "Value", Width: 85},
-			}),
-			table.WithRows([]table.Row{}),
-			table.WithFocused(true),
-			table.WithWidth(120),
-		)
 		m.showEnvs = false
 		if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
-			panic(err)
+			log.Panicln(err)
 		}
 	}
 }
 
-func (m *model) displayEnv() tea.Msg {
-	m.showEnvs = true
-	c := m.containers.SelectedRow()[0]
-	j, err := m.cli.ContainerInspect(context.Background(), c)
+func (m mainModel) newEnvModel() tea.Msg {
+	e := new(envModel)
+	e.container = m.containers.SelectedRow()[0]
+	e.cli = m.cli
+	j, err := m.cli.ContainerInspect(context.Background(), e.container)
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 	rows := []table.Row{}
-	for _, e := range j.Config.Env {
-		estring := strings.Split(e, "=")
+	for _, v := range j.Config.Env {
+		estring := strings.Split(v, "=")
 		rows = append(rows, table.Row{estring[0], estring[1]})
 
 	}
-	m.envs.SetRows(rows)
-	m.envs.GotoTop()
-	m.envs.Update(nil)
+	t := table.New(
+		table.WithColumns([]table.Column{
+			{Title: "Name", Width: 30},
+			{Title: "Value", Width: 85},
+		}),
+		table.WithRows(rows),
+		table.WithFocused(true),
+		table.WithWidth(120),
+	)
+	t.GotoTop()
+	s := table.DefaultStyles()
+	t.SetStyles(s)
 
+	e.envs = t
+	m.envs = *e
+	return display{*e}
+}
+
+func (m envModel) Init() tea.Msg {
 	return showEnv{}
 }
 
+func (m envModel) exit() tea.Msg {
+	return showContainers{}
+}
+
 // TODO: Only call updateEnv if something changed
-func (m *model) updateEnvCmd() tea.Msg {
+func (m envModel) updateEnvCmd() tea.Msg {
 	e := []string{}
 	e = append(e, m.n)
 	e = append(e, m.v)
 	u := strings.Join(e, "=")
-	m.showEnvs = false
-	o := m.containers.SelectedRow()[0]
-	ids, err := updateEnv(context.Background(), m.cli, []string{m.containers.SelectedRow()[0]}, u)
+	_, err := updateEnv(context.Background(), m.cli, []string{m.container}, u)
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
-	newRows := []table.Row{}
-	for _, v := range m.containers.Rows() {
-		if v[0] == o {
-			v[0] = ids[0]
-		}
-		newRows = append(newRows, v)
-	}
-	m.containers.SetRows(newRows)
 	return showContainers{}
 }
 
