@@ -55,6 +55,10 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.showEnvs == true {
+			m.envs, cmd = m.envs.Update(msg)
+			return m, cmd
+		}
 		switch msg.String() {
 		case "esc":
 			if m.showEnvs == true {
@@ -92,7 +96,7 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case showContainers:
 		m.spinner = nil
 		m.showEnvs = false
-		return m, nil
+		return m, m.updateContainers
 	}
 	if m.showEnvs == true {
 		e, cmd := m.envs.Update(msg)
@@ -146,6 +150,7 @@ func (m envModel) Update(msg tea.Msg) (envModel, tea.Cmd) {
 		msg.e.spinner = nil
 		return msg.e, cmd
 	}
+	m.envs, cmd = m.envs.Update(msg)
 	return m, cmd
 }
 
@@ -169,7 +174,7 @@ func (m envModel) View() string {
 func main() {
 	f, err := os.OpenFile("./log.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
-		log.Panicln(err)
+		println("Error opening log file, will continue")
 	}
 	defer f.Close()
 	log.SetOutput(f)
@@ -190,7 +195,9 @@ func main() {
 			log.Panicln(err)
 		}
 		if len(containers) == 0 {
-			log.Panicln("No containers found")
+			log.Println("No containers found")
+			println("No containers found")
+			os.Exit(1)
 		}
 		var ids []string
 		for _, v := range containers {
@@ -198,55 +205,65 @@ func main() {
 		}
 		_, err = updateEnv(ctx, cli, ids, envVar)
 		if err != nil {
-			log.Panicln(err)
+			log.Println(err)
+			fmt.Println("An error occurred")
+			os.Exit(1)
 		}
 		fmt.Println("OK")
 
 	} else {
-
-		containers, err := cli.ContainerList(ctx, container.ListOptions{})
-		if err != nil {
-			log.Panicln(err)
-		}
-
-		columns := []table.Column{
-			{Title: "ID", Width: 12},
-			{Title: "Name", Width: 30},
-			{Title: "Command", Width: 70},
-		}
-
-		rows := []table.Row{}
-
-		for _, v := range containers {
-			name, _ := strings.CutPrefix(strings.Join(v.Names, ", "), "/")
-			rows = append(
-				rows,
-				table.Row{
-					v.ID,
-					name,
-					v.Command,
-				},
-			)
-		}
-
-		t := table.New(
-			table.WithColumns(columns),
-			table.WithRows(rows),
-			table.WithFocused(true),
-			table.WithWidth(120),
-		)
-
-		s := table.DefaultStyles()
-		t.SetStyles(s)
-
 		m := new(mainModel)
 		m.cli = cli
+		t := m.getContainers()
 		m.containers = t
 		m.showEnvs = false
 		if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
 			log.Panicln(err)
 		}
 	}
+}
+
+func (m mainModel) getContainers() table.Model {
+	containers, err := m.cli.ContainerList(context.Background(), container.ListOptions{})
+	if err != nil {
+		log.Panicln(err)
+	}
+
+	columns := []table.Column{
+		{Title: "ID", Width: 12},
+		{Title: "Name", Width: 30},
+		{Title: "Command", Width: 70},
+	}
+
+	rows := []table.Row{}
+
+	for _, v := range containers {
+		name, _ := strings.CutPrefix(strings.Join(v.Names, ", "), "/")
+		rows = append(
+			rows,
+			table.Row{
+				v.ID,
+				name,
+				v.Command,
+			},
+		)
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(true),
+		table.WithWidth(120),
+	)
+
+	s := table.DefaultStyles()
+	t.SetStyles(s)
+	return t
+}
+
+func (m mainModel) updateContainers() tea.Msg {
+	m.containers = m.getContainers()
+	return nil
 }
 
 func (m mainModel) newEnvModel() tea.Msg {
@@ -260,7 +277,11 @@ func (m mainModel) newEnvModel() tea.Msg {
 	rows := []table.Row{}
 	for _, v := range j.Config.Env {
 		estring := strings.Split(v, "=")
-		rows = append(rows, table.Row{estring[0], estring[1]})
+		if len(estring) == 1 {
+			rows = append(rows, table.Row{estring[0], ""})
+		} else {
+			rows = append(rows, table.Row{estring[0], estring[1]})
+		}
 
 	}
 	t := table.New(
