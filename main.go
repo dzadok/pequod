@@ -298,7 +298,6 @@ func (m mainModel) newEnvModel() tea.Msg {
 	t.SetStyles(s)
 
 	e.envs = t
-	m.envs = *e
 	return display{*e}
 }
 
