@@ -45,6 +45,10 @@ type showEnv struct{}
 
 type showContainers struct{}
 
+type updateContainers struct {
+	containers table.Model
+}
+
 type display struct {
 	e envModel
 }
@@ -91,6 +95,9 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner = nil
 		m.showEnvs = false
 		return m, m.updateContainers
+	case updateContainers:
+		m.containers = msg.containers
+		return m, nil
 	}
 	if m.showEnvs == true {
 		e, cmd := m.envs.Update(msg)
@@ -257,8 +264,7 @@ func (m mainModel) getContainers() table.Model {
 }
 
 func (m mainModel) updateContainers() tea.Msg {
-	m.containers = m.getContainers()
-	return nil
+	return updateContainers{m.getContainers()}
 }
 
 func (m mainModel) newEnvModel() tea.Msg {
