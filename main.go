@@ -71,12 +71,6 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		// o => insert new line in vim, "a"dd, "n"ew
-		// case "o", "a", "n":
-		// 	if m.showEnvs == true {
-		// 		m.envs, cmd = m.envs.Update(msg)
-		// 		return m, cmd
-		// 	}
 		case "tab", "enter":
 			if m.showEnvs == true {
 				// 	m.showEnvs = false
@@ -130,6 +124,7 @@ func (m envModel) Update(msg tea.Msg) (envModel, tea.Cmd) {
 			m.spinner = &s
 			return m, tea.Batch(m.spinner.Tick, m.updateEnvCmd)
 
+		// o => insert new line in vim, "a"dd, "n"ew
 		case "o", "a", "n":
 			var varName string
 			var varValue string
