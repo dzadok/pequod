@@ -107,7 +107,7 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.spinner != nil {
 		s, cmd := m.spinner.Update(m.spinner.Tick())
 		m.spinner = &s
-		return m, cmd
+		return m, tea.Batch(cmd, m.updateContainers)
 	}
 	m.containers, cmd = m.containers.Update(msg)
 	return m, cmd
