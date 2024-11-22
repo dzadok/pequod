@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -97,7 +98,9 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.updateContainers
 	case updateContainers:
 		m.containers = msg.containers
-		return m, nil
+		return m, tea.Tick(time.Minute, func(_ time.Time) tea.Msg {
+			return m.updateContainers()
+		})
 	}
 	if m.showEnvs == true {
 		e, cmd := m.envs.Update(msg)
