@@ -13,3 +13,8 @@ go install github.com/dzadok/pequod@latest
 ```bash
 pequod {name} name=value
 ```
+
+or for the TUI simply:
+```bash
+pequod
+```
