@@ -54,11 +54,21 @@ type display struct {
 	e envModel
 }
 
-func (m mainModel) Init() tea.Cmd { return nil }
+type TickMsg time.Time
+
+func doTick() tea.Cmd {
+	return tea.Tick(time.Minute, func(t time.Time) tea.Msg {
+		return TickMsg(t)
+	})
+}
+
+func (m mainModel) Init() tea.Cmd { return doTick() }
 
 func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case TickMsg:
+		return m, tea.Batch(m.updateContainers, doTick())
 	case tea.KeyMsg:
 		if m.showEnvs == true {
 			m.envs, cmd = m.envs.Update(msg)
