@@ -218,7 +218,7 @@ func main() {
 		for _, v := range containers {
 			ids = append(ids, v.ID)
 		}
-		_, err = updateEnv(ctx, cli, ids, envVar)
+		_, err = updateEnv(ctx, cli, ids, []string{envVar})
 		if err != nil {
 			log.Println(err)
 			fmt.Println("An error occurred")
@@ -329,15 +329,14 @@ func (m envModel) updateEnvCmd() tea.Msg {
 	e = append(e, m.n)
 	e = append(e, m.v)
 	u := strings.Join(e, "=")
-	_, err := updateEnv(context.Background(), m.cli, []string{m.container}, u)
+	_, err := updateEnv(context.Background(), m.cli, []string{m.container}, []string{u})
 	if err != nil {
 		log.Panicln(err)
 	}
 	return showContainers{}
 }
 
-func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar string) ([]string, error) {
-	varName := strings.Split(envVar, "=")[0]
+func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar []string) ([]string, error) {
 	i := []string{}
 	for _, v := range ids {
 		oldContainer, err := cli.ContainerInspect(ctx, v)
@@ -345,16 +344,19 @@ func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar str
 			return nil, err
 		}
 		name := oldContainer.Name
-		found := false
-		for i, e := range oldContainer.Config.Env {
-			if strings.Split(e, "=")[0] == varName {
-				oldContainer.Config.Env[i] = envVar
-				found = true
-				break
+		for _, oneVar := range envVar {
+			varName := strings.Split(oneVar, "=")[0]
+			found := false
+			for i, e := range oldContainer.Config.Env {
+				if strings.Split(e, "=")[0] == varName {
+					oldContainer.Config.Env[i] = oneVar
+					found = true
+					break
+				}
 			}
-		}
-		if !found {
-			oldContainer.Config.Env = append(oldContainer.Config.Env, envVar)
+			if !found {
+				oldContainer.Config.Env = append(oldContainer.Config.Env, oneVar)
+			}
 		}
 		err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
 		if err != nil {
