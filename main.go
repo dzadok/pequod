@@ -159,6 +159,11 @@ func (m envModel) Update(msg tea.Msg) (envModel, tea.Cmd) {
 			m.n = varName
 			m.v = varValue
 			return m, m.updateEnvCmd
+		case "x", "d":
+			m.n = m.envs.SelectedRow()[0]
+			s := spinner.New()
+			m.spinner = &s
+			return m, tea.Batch(m.spinner.Tick, m.removeEnvCommand)
 		}
 	case display:
 		msg.e.envs, cmd = msg.e.envs.Update(msg)
@@ -384,6 +389,65 @@ func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar []s
 			return nil, err
 		}
 		i = append(i, newContainer.ID)
+	}
+	return i, nil
+}
+
+func (m envModel) removeEnvCommand() tea.Msg {
+	e := m.n
+	_, err := removeEnv(context.Background(), m.cli, []string{m.container}, e)
+	if err != nil {
+		log.Panicln(err)
+	}
+	return showContainers{}
+}
+
+func removeEnv(ctx context.Context, cli *client.Client, ids []string, envVar string) ([]string, error) {
+	i := []string{}
+	for _, v := range ids {
+		oldContainer, err := cli.ContainerInspect(ctx, v)
+		if err != nil {
+			return nil, err
+		}
+		name := oldContainer.Name
+		found := false
+		for i, e := range oldContainer.Config.Env {
+			log.Println(strings.Split(e, "=")[0])
+			if strings.Split(e, "=")[0] == envVar {
+				oldContainer.Config.Env = append(oldContainer.Config.Env[:i], oldContainer.Config.Env[i+1:]...)
+				found = true
+			}
+		}
+		if found {
+			log.Println(found, name)
+			err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
+			if err != nil {
+				return nil, err
+			}
+			newContainer, err := cli.ContainerCreate(ctx,
+				oldContainer.Config,
+				oldContainer.HostConfig,
+				&network.NetworkingConfig{EndpointsConfig: oldContainer.NetworkSettings.Networks},
+				nil,
+				"tempname")
+			if err != nil {
+				return nil, err
+			}
+			err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
+			if err != nil {
+				return nil, err
+			}
+			err = cli.ContainerRename(ctx, newContainer.ID, name)
+			if err != nil {
+				return nil, err
+			}
+			err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
+			if err != nil {
+				return nil, err
+			}
+			i = append(i, newContainer.ID)
+		}
+
 	}
 	return i, nil
 }
