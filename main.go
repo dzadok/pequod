@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
@@ -328,6 +329,36 @@ func (m envModel) exit() tea.Msg {
 	return showContainers{}
 }
 
+func restartContainer(ctx context.Context, cli *client.Client, oldContainer types.ContainerJSON) (string, error) {
+	name := oldContainer.Name
+	err := cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
+	if err != nil {
+		return "", err
+	}
+	newContainer, err := cli.ContainerCreate(ctx,
+		oldContainer.Config,
+		oldContainer.HostConfig,
+		&network.NetworkingConfig{EndpointsConfig: oldContainer.NetworkSettings.Networks},
+		nil,
+		"tempname")
+	if err != nil {
+		return "", err
+	}
+	err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
+	if err != nil {
+		return "", err
+	}
+	err = cli.ContainerRename(ctx, newContainer.ID, name)
+	if err != nil {
+		return "", err
+	}
+	err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
+	if err != nil {
+		return "", err
+	}
+	return newContainer.ID, nil
+}
+
 // TODO: Only call updateEnv if something changed
 func (m envModel) updateEnvCmd() tea.Msg {
 	e := []string{}
@@ -348,7 +379,6 @@ func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar []s
 		if err != nil {
 			return nil, err
 		}
-		name := oldContainer.Name
 		for _, oneVar := range envVar {
 			varName := strings.Split(oneVar, "=")[0]
 			found := false
@@ -363,32 +393,11 @@ func updateEnv(ctx context.Context, cli *client.Client, ids []string, envVar []s
 				oldContainer.Config.Env = append(oldContainer.Config.Env, oneVar)
 			}
 		}
-		err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
+		d, err := restartContainer(ctx, cli, oldContainer)
 		if err != nil {
 			return nil, err
 		}
-		newContainer, err := cli.ContainerCreate(ctx,
-			oldContainer.Config,
-			oldContainer.HostConfig,
-			&network.NetworkingConfig{EndpointsConfig: oldContainer.NetworkSettings.Networks},
-			nil,
-			"tempname")
-		if err != nil {
-			return nil, err
-		}
-		err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
-		if err != nil {
-			return nil, err
-		}
-		err = cli.ContainerRename(ctx, newContainer.ID, name)
-		if err != nil {
-			return nil, err
-		}
-		err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
-		if err != nil {
-			return nil, err
-		}
-		i = append(i, newContainer.ID)
+		i = append(i, d)
 	}
 	return i, nil
 }
@@ -409,7 +418,6 @@ func removeEnv(ctx context.Context, cli *client.Client, ids []string, envVar str
 		if err != nil {
 			return nil, err
 		}
-		name := oldContainer.Name
 		found := false
 		for i, e := range oldContainer.Config.Env {
 			log.Println(strings.Split(e, "=")[0])
@@ -419,33 +427,11 @@ func removeEnv(ctx context.Context, cli *client.Client, ids []string, envVar str
 			}
 		}
 		if found {
-			log.Println(found, name)
-			err = cli.ContainerStop(ctx, oldContainer.ID, container.StopOptions{})
+			d, err := restartContainer(ctx, cli, oldContainer)
 			if err != nil {
 				return nil, err
 			}
-			newContainer, err := cli.ContainerCreate(ctx,
-				oldContainer.Config,
-				oldContainer.HostConfig,
-				&network.NetworkingConfig{EndpointsConfig: oldContainer.NetworkSettings.Networks},
-				nil,
-				"tempname")
-			if err != nil {
-				return nil, err
-			}
-			err = cli.ContainerRemove(ctx, oldContainer.ID, container.RemoveOptions{Force: true})
-			if err != nil {
-				return nil, err
-			}
-			err = cli.ContainerRename(ctx, newContainer.ID, name)
-			if err != nil {
-				return nil, err
-			}
-			err = cli.ContainerStart(ctx, newContainer.ID, container.StartOptions{})
-			if err != nil {
-				return nil, err
-			}
-			i = append(i, newContainer.ID)
+			i = append(i, d)
 		}
 
 	}
